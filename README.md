@@ -1,2 +1,3 @@
-# consoleApp2
-LoftSchool homework-2 part-2
+# Help
+
+node index.js --help

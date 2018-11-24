@@ -11,17 +11,15 @@ const createCollection = (base, targetDir, needDelete) => {
     fs.mkdirSync(path.join(__dirname, targetDir));
   }
 
-  const removeDir = resPath => {
-    const dir = path.dirname(resPath)
-
+  const removeDir = dir => {
     if (!fs.existsSync(dir)) {
       return
     }
 
     const files = fs.readdirSync(dir);
 
-    if (files && files.length > 0 ) {
-      return
+    if (files.length > 0) {
+      files.map(file => removeDir(path.join(dir, file)))
     }
 
     rmdirPromise(dir).then(() => {
@@ -32,59 +30,66 @@ const createCollection = (base, targetDir, needDelete) => {
       }
 
       removeDir(parentDir)
-    }).catch(err => {
-      if (err.code === 'ENOENT') {
-        console.error(err.path, ' – directory already deleted')
-      }
     })
   };
 
-  const removeFile = file => {
-    unlinkPromise(file).then(() => {
-      removeDir(file)
-    }).catch(err => console.error(err))
-  }
+  const removeFiles = files => files.map(file => {
+    return unlinkPromise(file)
+  })
+
+  const copyFiles = files => files.map(file => {
+    const fileName = path.basename(file)
+    const neededDir = path.join(targetDir, fileName.slice(0, 1));
+
+    const filePath = path.join(neededDir, fileName)
+
+    if (fs.existsSync(filePath)) {
+      return null
+    }
+
+    if (!fs.existsSync(neededDir)) {
+      fs.mkdirSync(neededDir);
+    }
+
+    return linkPromise(file, filePath)
+  }).filter(item => item)
 
   const readDir = dir => {
     const files = fs.readdirSync(dir);
 
-    files.forEach(item => {
+    return files.reduce((acc, item) => {
       const localBase = path.join(dir, item);
       const stat = fs.statSync(localBase);
 
       if (stat.isFile()) {
-        const dirName = item.slice(0, 1);
-        const neededDir = path.join(targetDir, dirName);
-
-        if (!fs.existsSync(neededDir)) {
-          fs.mkdirSync(neededDir);
-        }
-
-        const filePath = path.join(neededDir, item);
-
-        if (!fs.existsSync(filePath)) {
-          linkPromise(localBase, path.join(neededDir, item)).then(resp => {
-            if(!needDelete) {
-              return
-            }
-            removeFile(localBase)
-          }).catch(err => console.error(err))
-          return
-        }
-
-        if (!needDelete) {
-          return
-        }
-
-        removeFile(localBase)
+        return [...acc, localBase]
       }
 
       if (stat.isDirectory()) {
-        readDir(localBase);
+        return [...acc, ...readDir(localBase)]
       }
-    });
+
+    }, [])
   };
-  readDir(base);
+
+  const files = readDir(base);
+
+  Promise.all(copyFiles(files)).then(() => {
+
+    if (needDelete) {
+      return Promise.all(removeFiles(files)).then(
+        removeDir(base)
+      ).catch(err => {
+        console.log(err)
+      })
+    }
+    return null
+  }).then(() => {
+    console.log('Directory copied')
+  }).catch(err => {
+    process.exit(500)
+  })
 };
 
 module.exports = createCollection;
+
